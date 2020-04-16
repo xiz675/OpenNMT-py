@@ -102,6 +102,7 @@ def parse_align_idx(align_pharaoh):
 def get_fields(
     src_data_type,
     n_src_feats,
+    n_conv_feats,
     n_tgt_feats,
     pad='<blank>',
     bos='<s>',
@@ -109,6 +110,7 @@ def get_fields(
     dynamic_dict=False,
     with_align=False,
     src_truncate=None,
+    conv_truncate=None,
     tgt_truncate=None
 ):
     """
@@ -155,11 +157,19 @@ def get_fields(
                         "base_name": "src"}
     fields["src"] = fields_getters[src_data_type](**src_field_kwargs)
 
+    conv_field_kwargs = {"n_feats": n_conv_feats,
+                        "include_lengths": True,
+                        "pad": pad, "bos": None, "eos": None,
+                        "truncate": conv_truncate,
+                        "base_name": "conv"}
+
     tgt_field_kwargs = {"n_feats": n_tgt_feats,
                         "include_lengths": False,
                         "pad": pad, "bos": bos, "eos": eos,
                         "truncate": tgt_truncate,
                         "base_name": "tgt"}
+
+    fields["conv"] = fields_getters["text"](**conv_field_kwargs)
     fields["tgt"] = fields_getters["text"](**tgt_field_kwargs)
 
     indices = Field(use_vocab=False, dtype=torch.long, sequential=False)
@@ -176,6 +186,14 @@ def get_fields(
 
         src_ex_vocab = RawField()
         fields["src_ex_vocab"] = src_ex_vocab
+
+        conv_map = Field(
+            use_vocab=False, dtype=torch.float,
+            postprocessing=make_src, sequential=False)
+        fields["conv_map"] = conv_map
+
+        conv_ex_vocab = RawField()
+        fields["conv_ex_vocab"] = conv_ex_vocab
 
         align = Field(
             use_vocab=False, dtype=torch.long,
@@ -321,9 +339,10 @@ def filter_example(ex, use_src_len=True, use_tgt_len=True,
     """
 
     src_len = len(ex.src[0])
+    conv_len = len(ex.conv[0])
     tgt_len = len(ex.tgt[0])
     return (not use_src_len or min_src_len <= src_len <= max_src_len) and \
-        (not use_tgt_len or min_tgt_len <= tgt_len <= max_tgt_len)
+           (not use_tgt_len or min_tgt_len <= tgt_len <= max_tgt_len)
 
 
 def _pad_vocab_to_multiple(vocab, multiple):
@@ -374,12 +393,15 @@ def _build_fv_from_multifield(multifield, counters, build_fv_args,
 def _build_fields_vocab(fields, counters, data_type, share_vocab,
                         vocab_size_multiple,
                         src_vocab_size, src_words_min_frequency,
+                        conv_vocab_size, conv_words_min_frequency,
                         tgt_vocab_size, tgt_words_min_frequency,
                         subword_prefix="▁",
                         subword_prefix_is_joiner=False):
     build_fv_args = defaultdict(dict)
     build_fv_args["src"] = dict(
         max_size=src_vocab_size, min_freq=src_words_min_frequency)
+    build_fv_args["conv"] = dict(
+        max_size=conv_vocab_size, min_freq=conv_words_min_frequency)
     build_fv_args["tgt"] = dict(
         max_size=tgt_vocab_size, min_freq=tgt_words_min_frequency)
     tgt_multifield = fields["tgt"]
@@ -401,13 +423,22 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
             build_fv_args,
             size_multiple=vocab_size_multiple if not share_vocab else 1)
 
+        conv_multifield = fields["conv"]
+        _build_fv_from_multifield(
+            conv_multifield,
+            counters,
+            build_fv_args,
+            size_multiple=vocab_size_multiple if not share_vocab else 1)
+
+
         if share_vocab:
             # `tgt_vocab_size` is ignored when sharing vocabularies
             logger.info(" * merging src and tgt vocab...")
             src_field = src_multifield.base_field
+            conv_field = conv_multifield.base_field
             tgt_field = tgt_multifield.base_field
             _merge_field_vocabs(
-                src_field, tgt_field, vocab_size=src_vocab_size,
+                src_field, conv_field, tgt_field, vocab_size=src_vocab_size,
                 min_freq=src_words_min_frequency,
                 vocab_size_multiple=vocab_size_multiple)
             logger.info(" * merged vocab size: %d." % len(src_field.vocab))
@@ -537,14 +568,14 @@ def build_vocab(train_dataset_files, fields, data_type, share_vocab,
     return fields  # is the return necessary?
 
 
-def _merge_field_vocabs(src_field, tgt_field, vocab_size, min_freq,
+def _merge_field_vocabs(src_field, conv_field, tgt_field, vocab_size, min_freq,
                         vocab_size_multiple):
     # in the long run, shouldn't it be possible to do this by calling
     # build_vocab with both the src and tgt data?
     specials = [tgt_field.unk_token, tgt_field.pad_token,
                 tgt_field.init_token, tgt_field.eos_token]
     merged = sum(
-        [src_field.vocab.freqs, tgt_field.vocab.freqs], Counter()
+        [src_field.vocab.freqs, conv_field.vocab.freqs, tgt_field.vocab.freqs], Counter()
     )
     merged_vocab = Vocab(
         merged, specials=specials,
@@ -553,8 +584,9 @@ def _merge_field_vocabs(src_field, tgt_field, vocab_size, min_freq,
     if vocab_size_multiple > 1:
         _pad_vocab_to_multiple(merged_vocab, vocab_size_multiple)
     src_field.vocab = merged_vocab
+    conv_field.vocab = merged_vocab
     tgt_field.vocab = merged_vocab
-    assert len(src_field.vocab) == len(tgt_field.vocab)
+    assert len(src_field.vocab) == len(tgt_field.vocab) == len(conv_field.vocab)
 
 
 def _read_vocab_file(vocab_path, tag):

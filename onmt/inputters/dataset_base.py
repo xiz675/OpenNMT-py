@@ -21,7 +21,7 @@ def _join_dicts(*args):
     return dict(chain(*[d.items() for d in args]))
 
 
-def _dynamic_dict(example, src_field, tgt_field):
+def _dynamic_dict(example, src_field, conv_field, tgt_field):
     """Create copy-vocab and numericalize with it.
 
     In-place adds ``"src_map"`` to ``example``. That is the copy-vocab
@@ -46,18 +46,33 @@ def _dynamic_dict(example, src_field, tgt_field):
     unk = src_field.unk_token
     pad = src_field.pad_token
     src_ex_vocab = Vocab(Counter(src), specials=[unk, pad])
-    unk_idx = src_ex_vocab.stoi[unk]
+    src_unk_idx = src_ex_vocab.stoi[unk]
     # Map source tokens to indices in the dynamic dict.
     src_map = torch.LongTensor([src_ex_vocab.stoi[w] for w in src])
     example["src_map"] = src_map
     example["src_ex_vocab"] = src_ex_vocab
 
+    conv = conv_field.tokenize(example["conv"])
+    # make a small vocab containing just the tokens in the source sequence
+    unk = conv_field.unk_token
+    pad = conv_field.pad_token
+    conv_ex_vocab = Vocab(Counter(conv), specials=[unk, pad])
+    conv_unk_idx = conv_ex_vocab.stoi[unk]
+    # Map source tokens to indices in the dynamic dict.
+    conv_map = torch.LongTensor([conv_ex_vocab.stoi[w] for w in conv])
+    example["conv_map"] = conv_map
+    example["conv_ex_vocab"] = conv_ex_vocab
+
     if "tgt" in example:
         tgt = tgt_field.tokenize(example["tgt"])
         mask = torch.LongTensor(
-            [unk_idx] + [src_ex_vocab.stoi[w] for w in tgt] + [unk_idx])
+            [src_unk_idx] + [src_ex_vocab.stoi[w] for w in tgt] + [src_unk_idx])
         example["alignment"] = mask
-    return src_ex_vocab, example
+
+        mask = torch.LongTensor(
+            [conv_unk_idx] + [conv_ex_vocab.stoi[w] for w in tgt] + [conv_unk_idx])
+        example["conv_alignment"] = mask
+    return src_ex_vocab, conv_ex_vocab, example
 
 
 class Dataset(TorchtextDataset):
@@ -112,11 +127,13 @@ class Dataset(TorchtextDataset):
         self.sort_key = sort_key
         can_copy = 'src_map' in fields and 'alignment' in fields
 
-        read_iters = [r.read(dat[1], dat[0], dir_) for r, dat, dir_
+        read_iters = [r.read(dat[1],  dat[0],  dir_) for r, dat, dir_
                       in zip(readers, data, dirs)]
 
         # self.src_vocabs is used in collapse_copy_scores and Translator.py
         self.src_vocabs = []
+        self.conv_vocabs = []
+
         examples = []
         for ex_dict in starmap(_join_dicts, zip(*read_iters)):
             if corpus_id is not None:
@@ -125,11 +142,14 @@ class Dataset(TorchtextDataset):
                 ex_dict["corpus_id"] = "train"
             if can_copy:
                 src_field = fields['src']
+                conv_field = fields['conv']
                 tgt_field = fields['tgt']
                 # this assumes src_field and tgt_field are both text
-                src_ex_vocab, ex_dict = _dynamic_dict(
-                    ex_dict, src_field.base_field, tgt_field.base_field)
+                src_ex_vocab, conv_ex_vocab, ex_dict = _dynamic_dict(
+                    ex_dict, src_field.base_field, conv_field.base_field, tgt_field.base_field)
                 self.src_vocabs.append(src_ex_vocab)
+                self.conv_vocabs.append(conv_ex_vocab)
+
             ex_fields = {k: [(k, v)] for k, v in fields.items() if
                          k in ex_dict}
             ex = Example.fromdict(ex_dict, ex_fields)

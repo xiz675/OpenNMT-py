@@ -235,6 +235,8 @@ def preprocess_opts(parser):
 
     group.add('--train_src', '-train_src', required=True, nargs='+',
               help="Path(s) to the training source data")
+    group.add('--train_conv', '-train_conv', required=True, nargs='+',
+              help="Path(s) to the training conversation data")
     group.add('--train_tgt', '-train_tgt', required=True, nargs='+',
               help="Path(s) to the training target data")
     group.add('--train_align', '-train_align', nargs='+', default=[None],
@@ -244,6 +246,8 @@ def preprocess_opts(parser):
 
     group.add('--valid_src', '-valid_src',
               help="Path to the validation source data")
+    group.add('--valid_conv', '-valid_conv',
+              help="Path to the validation conversation data")
     group.add('--valid_tgt', '-valid_tgt',
               help="Path to the validation target data")
     group.add('--valid_align', '-valid_align', default=None,
@@ -289,6 +293,8 @@ def preprocess_opts(parser):
               help="Path prefix to existing features vocabularies")
     group.add('--src_vocab_size', '-src_vocab_size', type=int, default=50000,
               help="Size of the source vocabulary")
+    group.add('--conv_vocab_size', '-conv_vocab_size', type=int, default=50000,
+              help="Size of the conversation vocabulary")
     group.add('--tgt_vocab_size', '-tgt_vocab_size', type=int, default=50000,
               help="Size of the target vocabulary")
     group.add('--vocab_size_multiple', '-vocab_size_multiple',
@@ -297,6 +303,8 @@ def preprocess_opts(parser):
 
     group.add('--src_words_min_frequency',
               '-src_words_min_frequency', type=int, default=0)
+    group.add('--conv_words_min_frequency',
+              '-conv_words_min_frequency', type=int, default=0)
     group.add('--tgt_words_min_frequency',
               '-tgt_words_min_frequency', type=int, default=0)
 
@@ -312,6 +320,11 @@ def preprocess_opts(parser):
     group.add('--src_seq_length_trunc', '-src_seq_length_trunc',
               type=int, default=None,
               help="Truncate source sequence length.")
+    group.add('--conv_seq_length', '-conv_seq_length', type=int, default=50,
+              help="Maximum conversation sequence length")
+    group.add('--conv_seq_length_trunc', '-conv_seq_length_trunc',
+              type=int, default=None,
+              help="Truncate conversation sequence length.")
     group.add('--tgt_seq_length', '-tgt_seq_length', type=int, default=50,
               help="Maximum target sequence length to keep.")
     group.add('--tgt_seq_length_trunc', '-tgt_seq_length_trunc',
