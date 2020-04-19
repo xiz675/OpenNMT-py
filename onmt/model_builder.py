@@ -146,6 +146,8 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
         src_emb = None
 
     # Build encoder.
+    if model_opt.encoder_type == "biattention":
+        model_opt.brnn = True
     encoder = build_encoder(model_opt, src_emb)
 
     # Build decoder.
@@ -169,7 +171,10 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
         device = torch.device("cuda")
     elif not gpu:
         device = torch.device("cpu")
-    model = onmt.models.NMTModel(encoder, decoder)
+    if model_opt.encoder_type == 'biattention':
+        model = onmt.models.TwoEncoderModel(encoder, decoder)
+    else:
+        model = onmt.models.NMTModel(encoder, decoder)
 
     # Build Generator.
     if not model_opt.copy_attn:

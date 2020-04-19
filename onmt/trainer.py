@@ -306,7 +306,7 @@ class Trainer(object):
             self.model_saver.save(step, moving_average=self.moving_average)
         return total_stats
 
-    def validate(self, valid_iter, moving_average=None):
+    def validate(self, valid_iter,  moving_average=None):
         """ Validate model.
             valid_iter: validate data iterator
         Returns:
@@ -332,11 +332,18 @@ class Trainer(object):
             for batch in valid_iter:
                 src, src_lengths = batch.src if isinstance(batch.src, tuple) \
                                    else (batch.src, None)
+                conv, conv_lengths = batch.conv if isinstance(batch.conv, tuple) \
+                    else (batch.conv, None)
                 tgt = batch.tgt
 
                 # F-prop through the model.
-                outputs, attns = valid_model(src, tgt, src_lengths,
-                                             with_align=self.with_align)
+                if valid_model.__class__.__name__ == "NMTModel":
+                    outputs, attns = valid_model(src, tgt, src_lengths,
+                                                 with_align=self.with_align)
+                else:
+                    outputs, attns, _ = \
+                        self.model(src, conv, tgt,
+                                   (src_lengths, conv_lengths))
 
                 # Compute loss.
                 _, batch_stats = self.valid_loss(batch, outputs, attns)
@@ -370,6 +377,8 @@ class Trainer(object):
 
             src, src_lengths = batch.src if isinstance(batch.src, tuple) \
                 else (batch.src, None)
+            conv, conv_lengths = batch.conv if isinstance(batch.conv, tuple) \
+                else (batch.conv, None)
             if src_lengths is not None:
                 report_stats.n_src_words += src_lengths.sum().item()
 
@@ -383,9 +392,13 @@ class Trainer(object):
                 # 2. F-prop all but generator.
                 if self.accum_count == 1:
                     self.optim.zero_grad()
-
-                outputs, attns = self.model(src, tgt, src_lengths, bptt=bptt,
-                                            with_align=self.with_align)
+                if self.model.__class__.__name__ == "NMTModel":
+                    outputs, attns = \
+                        self.model(src, tgt, src_lengths, bptt=bptt, with_align=self.with_align)
+                else:
+                    outputs, attns = \
+                        self.model(src, conv, tgt,
+                                   (src_lengths, conv_lengths))
                 bptt = True
 
                 # 3. Compute loss.

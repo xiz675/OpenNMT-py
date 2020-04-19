@@ -178,8 +178,13 @@ class GlobalAttention(nn.Module):
         align = self.score(source, memory_bank)
 
         if memory_lengths is not None:
-            mask = sequence_mask(memory_lengths, max_len=align.size(-1))
-            mask = mask.unsqueeze(1)  # Make it broadcastable.
+            if isinstance(memory_lengths, tuple):
+                mask0 = sequence_mask(memory_lengths[0])  # yue [batch_size, max_src_len]
+                mask1 = sequence_mask(memory_lengths[1])  # yue [batch_size, max_conv_len]
+                mask = torch.cat([mask0, mask1], dim=1).unsqueeze(1)  # Make it broadcastable.
+            else:
+                mask = sequence_mask(memory_lengths)
+                mask = mask.unsqueeze(1)
             align.masked_fill_(~mask, -float('inf'))
 
         # Softmax or sparsemax to normalize attention weights

@@ -54,3 +54,29 @@ class NMTModel(nn.Module):
     def update_dropout(self, dropout):
         self.encoder.update_dropout(dropout)
         self.decoder.update_dropout(dropout)
+
+
+class TwoEncoderModel(nn.Module):
+    """
+    Different from NMTModel, the TwoEncoderModel has two encoders for the post and conversation
+    """
+
+    def __init__(self, encoder, decoder, multigpu=False):
+        self.multigpu = multigpu
+        super(TwoEncoderModel, self).__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+
+    def forward(self, src, conversation, tgt, lengths):
+        """Forward propagate a `src` `conversation` and `tgt` pair for training.
+        Possible initialized with a beginning decoder state.
+        src: [src_len, batch_size, dim]
+        """
+        tgt = tgt[:-1]  # exclude last target from inputs
+
+        enc_final, memory_bank, lengths = self.encoder(src, conversation, lengths)
+        self.decoder.init_state(src, memory_bank, enc_final)
+        decoder_outputs,  attns = \
+            self.decoder(tgt, memory_bank,
+                         memory_lengths=lengths)
+        return decoder_outputs, attns

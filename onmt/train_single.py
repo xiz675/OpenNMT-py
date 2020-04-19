@@ -73,7 +73,7 @@ def main(opt, device_id, batch_queue=None, semaphore=None):
     patch_fields(opt, fields)
 
     # Report src and tgt vocab sizes, including for features
-    for side in ['src', 'tgt']:
+    for side in ['src', 'conv', 'tgt']:
         f = fields[side]
         try:
             f_iter = iter(f)

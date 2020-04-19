@@ -389,6 +389,7 @@ class InputFeedRNNDecoder(RNNDecoderBase):
         for emb_t in emb.split(1):
             decoder_input = torch.cat([emb_t.squeeze(0), input_feed], 1)
             rnn_output, dec_state = self.rnn(decoder_input, dec_state)
+
             if self.attentional:
                 decoder_output, p_attn = self.attn(
                     rnn_output,
