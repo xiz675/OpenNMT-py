@@ -90,6 +90,7 @@ class CopyGenerator(nn.Module):
         super(CopyGenerator, self).__init__()
         self.linear = nn.Linear(input_size, output_size)
         self.linear_copy = nn.Linear(input_size, 1)
+        self.linear_conv_copy = nn.Linear(input_size, 1)
         self.pad_idx = pad_idx
 
     def forward(self, hidden, attn, conv_attn, src_map, conv_map):
@@ -110,9 +111,12 @@ class CopyGenerator(nn.Module):
         # CHECKS
         batch_by_tlen, _ = hidden.size()
         batch_by_tlen_, slen = attn.size()
+        batch_by_tlen__, conv_slen = conv_attn.size()
         slen_, batch, cvocab = src_map.size()
-        aeq(batch_by_tlen, batch_by_tlen_)
+        conv_slen_, batch_, conv_cvocab = conv_map.size()
+        aeq(batch_by_tlen, batch_by_tlen_, batch_by_tlen__)
         aeq(slen, slen_)
+        aeq(conv_slen, conv_slen_)
 
         # Original probabilities.
         logits = self.linear(hidden)
@@ -120,20 +124,31 @@ class CopyGenerator(nn.Module):
         prob = torch.softmax(logits, 1)
 
         # Probability of copying p(z=1) batch.
-        p_copy = torch.sigmoid(self.linear_copy(hidden))
-        # Probability of not copying: p_{word}(w) * (1 - p(z))
-        out_prob = torch.mul(prob, 1 - p_copy)
-        mul_attn = torch.mul(attn, p_copy)
+        p_tweets_copy = torch.sigmoid(self.linear_copy(hidden))
+        p_conv_copy = torch.sigmoid(self.linear_conv_copy(hidden))
+
+        mul_attn = torch.mul(attn, p_tweets_copy)
+        mul_conv_attn = torch.mul(conv_attn, p_conv_copy)
+
         copy_prob = torch.bmm(
             mul_attn.view(-1, batch, slen).transpose(0, 1),
             src_map.transpose(0, 1)
         ).transpose(0, 1)
         copy_prob = copy_prob.contiguous().view(-1, cvocab)
-        return torch.cat([out_prob, copy_prob], 1)
+        conv_copy_prob = torch.bmm(
+            mul_conv_attn.view(-1, batch_, conv_slen).transpose(0, 1),
+            conv_map.transpose(0, 1)
+        ).transpose(0, 1)
+        conv_copy_prob = conv_copy_prob.contiguous().view(-1, conv_cvocab)
+
+        # Probability of not copying: p_{word}(w) * (1 - p(z))
+        out_prob = torch.mul(prob, 1 - p_tweets_copy - p_conv_copy)
+        return torch.cat([out_prob, copy_prob, conv_copy_prob], 1)
 
 
 class CopyGeneratorLoss(nn.Module):
     """Copy generator criterion."""
+
     def __init__(self, vocab_size, force_copy, unk_index=0,
                  ignore_index=-100, eps=1e-20):
         super(CopyGeneratorLoss, self).__init__()
@@ -179,6 +194,7 @@ class CopyGeneratorLoss(nn.Module):
 
 class CopyGeneratorLossCompute(NMTLossCompute):
     """Copy Generator Loss Computation."""
+
     def __init__(self, criterion, generator, tgt_vocab, normalize_by_length,
                  lambda_coverage=0.0):
         super(CopyGeneratorLossCompute, self).__init__(
