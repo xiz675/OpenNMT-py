@@ -92,7 +92,7 @@ class CopyGenerator(nn.Module):
         self.linear_copy = nn.Linear(input_size, 1)
         self.pad_idx = pad_idx
 
-    def forward(self, hidden, attn, src_map):
+    def forward(self, hidden, attn, conv_attn, src_map, conv_map):
         """
         Compute a distribution over the target dictionary
         extended by the dynamic dictionary implied by copying
@@ -197,11 +197,12 @@ class CopyGeneratorLossCompute(NMTLossCompute):
 
         shard_state.update({
             "copy_attn": attns.get("copy"),
+            "conv_copy_attn": attns.get("conv_copy"),
             "align": batch.alignment[range_[0] + 1: range_[1]]
         })
         return shard_state
 
-    def _compute_loss(self, batch, output, target, copy_attn, align,
+    def _compute_loss(self, batch, output, target, copy_attn, conv_copy_attn, align,
                       std_attn=None, coverage_attn=None):
         """Compute the loss.
 
@@ -217,7 +218,7 @@ class CopyGeneratorLossCompute(NMTLossCompute):
         target = target.view(-1)
         align = align.view(-1)
         scores = self.generator(
-            self._bottle(output), self._bottle(copy_attn), batch.src_map
+            self._bottle(output), self._bottle(copy_attn), self._bottle(conv_copy_attn), batch.src_map, batch.conv_map
         )
         loss = self.criterion(scores, align, target)
 

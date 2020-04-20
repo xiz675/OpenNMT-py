@@ -145,5 +145,4 @@ class BiAttEncoder(EncoderBase):
             outputs = self.combine_output(
                 torch.cat([src_outputs, ans_outputs], dim=0))  # [src_seq_len+ans_seq_len, batch_size, 2 * hidden]
             hidden = self.combine_hidden(torch.cat([src_hidden, ans_hidden], dim=-1))  # [2, batch_size, hidden]
-
         return hidden, outputs, lengths

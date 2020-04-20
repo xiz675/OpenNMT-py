@@ -131,6 +131,10 @@ class RNNDecoderBase(DecoderBase):
             self.copy_attn = GlobalAttention(
                 hidden_size, attn_type=copy_attn_type, attn_func=attn_func
             )
+            self.copy_conv_attn = GlobalAttention(
+                hidden_size, attn_type=copy_attn_type, attn_func=attn_func
+            )
+
         else:
             self.copy_attn = None
 
@@ -372,7 +376,10 @@ class InputFeedRNNDecoder(RNNDecoderBase):
         attns = {}
         if self.attn is not None:
             attns["std"] = []
-        if self.copy_attn is not None or self._reuse_copy_attn:
+        if (self.copy_attn is not None or self._reuse_copy_attn) and isinstance(memory_lengths, tuple):
+            attns["copy"] = []
+            attns["conv_copy"] = []
+        elif self.copy_attn is not None or self._reuse_copy_attn:
             attns["copy"] = []
         if self._coverage:
             attns["coverage"] = []
@@ -414,7 +421,16 @@ class InputFeedRNNDecoder(RNNDecoderBase):
                 coverage = p_attn if coverage is None else p_attn + coverage
                 attns["coverage"] += [coverage]
 
-            if self.copy_attn is not None:
+            if self.copy_attn is not None and isinstance(memory_lengths, tuple):
+                src_bank = memory_bank[:memory_lengths[0], :, :]
+                conv_bank = memory_bank[:memory_lengths[1], :, :]
+                _, copy_attn = self.copy_attn(
+                    decoder_output, src_bank.transpose(0, 1), memory_lengths=memory_lengths[0])
+                attns["copy"] += [copy_attn]
+                _, copy_attn = self.copy_conv_attn(
+                    decoder_output, conv_bank.transpose(0, 1), memory_lengths=memory_lengths[1])
+                attns["conv_copy"] += [copy_attn]
+            elif self.copy_attn is not None:
                 _, copy_attn = self.copy_attn(
                     decoder_output, memory_bank.transpose(0, 1))
                 attns["copy"] += [copy_attn]
