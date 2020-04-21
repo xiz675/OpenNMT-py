@@ -422,13 +422,14 @@ class InputFeedRNNDecoder(RNNDecoderBase):
                 attns["coverage"] += [coverage]
 
             if self.copy_attn is not None and isinstance(memory_lengths, tuple):
-                src_bank = memory_bank[:memory_lengths[0], :, :]
-                conv_bank = memory_bank[:memory_lengths[1], :, :]
+
+                src_bank = memory_bank[:memory_lengths[0].max(), :, :]
+                conv_bank = memory_bank[memory_lengths[1].max():, :, :]
                 _, copy_attn = self.copy_attn(
-                    decoder_output, src_bank.transpose(0, 1), memory_lengths=memory_lengths[0])
+                    decoder_output, src_bank.transpose(0, 1), memory_lengths=memory_lengths[0].max())
                 attns["copy"] += [copy_attn]
                 _, copy_attn = self.copy_conv_attn(
-                    decoder_output, conv_bank.transpose(0, 1), memory_lengths=memory_lengths[1])
+                    decoder_output, conv_bank.transpose(0, 1), memory_lengths=memory_lengths[1].max())
                 attns["conv_copy"] += [copy_attn]
             elif self.copy_attn is not None:
                 _, copy_attn = self.copy_attn(
