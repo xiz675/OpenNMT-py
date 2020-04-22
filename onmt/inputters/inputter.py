@@ -200,6 +200,10 @@ def get_fields(
             postprocessing=make_tgt, sequential=False)
         fields["alignment"] = align
 
+        align_conv = Field(
+            use_vocab=False, dtype=torch.long,
+            postprocessing=make_tgt, sequential=False)
+        fields["conv_alignment"] = align_conv
     if with_align:
         word_align = AlignField()
         fields["align"] = word_align

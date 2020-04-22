@@ -143,7 +143,8 @@ class CopyGenerator(nn.Module):
 
         # Probability of not copying: p_{word}(w) * (1 - p(z))
         out_prob = torch.mul(prob, 1 - p_tweets_copy - p_conv_copy)
-        return torch.cat([out_prob, copy_prob, conv_copy_prob], 1)
+        # return torch.cat([out_prob, copy_prob, conv_copy_prob], 1)
+        return out_prob, copy_prob, conv_copy_prob
 
 
 class CopyGeneratorLoss(nn.Module):
@@ -158,7 +159,7 @@ class CopyGeneratorLoss(nn.Module):
         self.ignore_index = ignore_index
         self.unk_index = unk_index
 
-    def forward(self, scores, align, target):
+    def forward(self, scores, align_src, align_conv, target):
         """
         Args:
             scores (FloatTensor): ``(batch_size*tgt_len)`` x dynamic vocab size
@@ -168,22 +169,34 @@ class CopyGeneratorLoss(nn.Module):
             target (LongTensor): ``(batch_size x tgt_len)``
         """
         # probabilities assigned by the model to the gold targets
-        vocab_probs = scores.gather(1, target.unsqueeze(1)).squeeze(1)
+        vocab_probs = scores[0].gather(1, target.unsqueeze(1)).squeeze(1)
 
         # probability of tokens copied from source
-        copy_ix = align.unsqueeze(1) + self.vocab_size
-        copy_tok_probs = scores.gather(1, copy_ix).squeeze(1)
+        # copy_ix = align_src.unsqueeze(1) + self.vocab_size
+        copy_ix = align_src.unsqueeze(1)
+        copy_tok_probs = scores[1].gather(1, copy_ix).squeeze(1)
+        # probability of tokens copied from conversation
+        copy_conv_ix = align_conv.unsqueeze(1)
+        copy_conv_tok_probs = scores[2].gather(1, copy_conv_ix).squeeze(1)
+
+
         # Set scores for unk to 0 and add eps
-        copy_tok_probs[align == self.unk_index] = 0
+        copy_tok_probs[align_src == self.unk_index] = 0
         copy_tok_probs += self.eps  # to avoid -inf logs
+        copy_conv_tok_probs[align_conv == self.unk_index] = 0
+        copy_conv_tok_probs += self.eps  # to avoid -inf logs
 
         # find the indices in which you do not use the copy mechanism
-        non_copy = align == self.unk_index
+        non_copy = torch.ones(align_src.size()).bool()
+        for i in range(align_src.size()[0]):
+            if align_src[i] != self.unk_index or align_conv[i] != self.unk_index:
+                non_copy[i] = False
+        # non_copy = align_src == self.unk_index and align_conv == self.unk_index
         if not self.force_copy:
             non_copy = non_copy | (target != self.unk_index)
 
         probs = torch.where(
-            non_copy, copy_tok_probs + vocab_probs, copy_tok_probs
+            non_copy, copy_tok_probs + copy_conv_tok_probs + vocab_probs, copy_tok_probs + copy_conv_tok_probs
         )
 
         loss = -probs.log()  # just NLLLoss; can the module be incorporated?
@@ -214,11 +227,12 @@ class CopyGeneratorLossCompute(NMTLossCompute):
         shard_state.update({
             "copy_attn": attns.get("copy"),
             "conv_copy_attn": attns.get("conv_copy"),
-            "align": batch.alignment[range_[0] + 1: range_[1]]
+            "align_src": batch.alignment[range_[0] + 1: range_[1]],
+            "align_conv": batch.conv_alignment[range_[0] + 1: range_[1]]
         })
         return shard_state
 
-    def _compute_loss(self, batch, output, target, copy_attn, conv_copy_attn, align,
+    def _compute_loss(self, batch, output, target, copy_attn, conv_copy_attn, align_src, align_conv,
                       std_attn=None, coverage_attn=None):
         """Compute the loss.
 
@@ -232,11 +246,12 @@ class CopyGeneratorLossCompute(NMTLossCompute):
             align: the align info.
         """
         target = target.view(-1)
-        align = align.view(-1)
+        align_src = align_src.view(-1)
+        align_conv = align_conv.view(-1)
         scores = self.generator(
             self._bottle(output), self._bottle(copy_attn), self._bottle(conv_copy_attn), batch.src_map, batch.conv_map
         )
-        loss = self.criterion(scores, align, target)
+        loss = self.criterion(scores, align_src, align_conv, target)
 
         if self.lambda_coverage != 0.0:
             coverage_loss = self._compute_coverage_loss(std_attn,
@@ -255,10 +270,12 @@ class CopyGeneratorLossCompute(NMTLossCompute):
         # Correct target copy token instead of <unk>
         # tgt[i] = align[i] + len(tgt_vocab)
         # for i such that tgt[i] == 0 and align[i] != 0
+
+        # xiuwen: I did not change this part since it does not influence loss
         target_data = target.clone()
         unk = self.criterion.unk_index
-        correct_mask = (target_data == unk) & (align != unk)
-        offset_align = align[correct_mask] + len(self.tgt_vocab)
+        correct_mask = (target_data == unk) & (align_src != unk)
+        offset_align = align_src[correct_mask] + len(self.tgt_vocab)
         target_data[correct_mask] += offset_align
 
         # Compute sum of perplexities for stats
