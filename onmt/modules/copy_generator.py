@@ -261,7 +261,7 @@ class CopyGeneratorLossCompute(NMTLossCompute):
         # this block does not depend on the loss value computed above
         # and is used only for stats
         scores_data = collapse_copy_scores(
-            self._unbottle(scores.clone(), batch.batch_size),
+            self._unbottle(torch.cat([scores[0], scores[1], scores[2]], 1).clone(), batch.batch_size),
             batch, self.tgt_vocab, None)
         scores_data = self._bottle(scores_data)
 
