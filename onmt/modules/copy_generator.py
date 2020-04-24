@@ -192,11 +192,12 @@ class CopyGeneratorLoss(nn.Module):
             if align_src[i] != self.unk_index or align_conv[i] != self.unk_index:
                 non_copy[i] = False
         # non_copy = align_src == self.unk_index and align_conv == self.unk_index
+        # print(type(non_copy), type(target), type(self.unk_index), non_copy.shape, target.shape, non_copy.get_device(), target.get_device())
         if not self.force_copy:
-            non_copy = non_copy | (target != self.unk_index)
+            non_copy = non_copy | (target.cpu() != self.unk_index)
 
         probs = torch.where(
-            non_copy, copy_tok_probs + copy_conv_tok_probs + vocab_probs, copy_tok_probs + copy_conv_tok_probs
+            non_copy.cuda(), copy_tok_probs + copy_conv_tok_probs + vocab_probs, copy_tok_probs + copy_conv_tok_probs
         )
 
         loss = -probs.log()  # just NLLLoss; can the module be incorporated?
