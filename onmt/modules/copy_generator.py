@@ -5,14 +5,16 @@ from onmt.utils.misc import aeq
 from onmt.utils.loss import NMTLossCompute
 
 
-def collapse_copy_scores(scores, batch, tgt_vocab, src_vocabs=None,
+def collapse_copy_scores(scores, batch, tgt_vocab, src_vocabs=None, conv_vocabs=None,
                          batch_dim=1, batch_offset=None):
     """
     Given scores from an expanded dictionary
     corresponeding to a batch, sums together copies,
     with a dictionary word when it is ambiguous.
     """
-    offset = len(tgt_vocab)
+    offset1 = len(tgt_vocab)
+    offset2 = batch.src_map.size()[-1] + offset1
+
     for b in range(scores.size(batch_dim)):
         blank = []
         fill = []
@@ -24,18 +26,34 @@ def collapse_copy_scores(scores, batch, tgt_vocab, src_vocabs=None,
             index = batch.indices.data[batch_id]
             src_vocab = src_vocabs[index]
 
+        if conv_vocabs is None:
+            conv_vocab = batch.conv_ex_vocab[b]
+        else:
+            batch_id = batch_offset[b] if batch_offset is not None else b
+            index = batch.indices.data[batch_id]
+            conv_vocab = conv_vocabs[index]
+
         for i in range(1, len(src_vocab)):
             sw = src_vocab.itos[i]
             ti = tgt_vocab.stoi[sw]
             if ti != 0:
-                blank.append(offset + i)
+                blank.append(offset1 + i)
                 fill.append(ti)
+
+        for j in range(1, len(conv_vocab)):
+            sw = conv_vocab.itos[j]
+            ti = tgt_vocab.stoi[sw]
+            if ti != 0:
+                blank.append(offset2 + j)
+                fill.append(ti)
+
         if blank:
             blank = torch.Tensor(blank).type_as(batch.indices.data)
             fill = torch.Tensor(fill).type_as(batch.indices.data)
             score = scores[:, b] if batch_dim == 1 else scores[b]
             score.index_add_(1, fill, score.index_select(1, blank))
             score.index_fill_(1, blank, 1e-10)
+
     return scores
 
 
@@ -264,6 +282,12 @@ class CopyGeneratorLossCompute(NMTLossCompute):
         scores_data = collapse_copy_scores(
             self._unbottle(torch.cat([scores[0], scores[1], scores[2]], 1).clone(), batch.batch_size),
             batch, self.tgt_vocab, None)
+
+        # scores_data = collapse_copy_scores(
+        #     self._unbottle(scores[0].clone(), batch.batch_size), self._unbottle(scores[1].clone(), batch.batch_size),
+        #     self._unbottle(scores[2].clone(), batch.batch_size),
+        #     batch, self.tgt_vocab, None)
+
         scores_data = self._bottle(scores_data)
 
         # this block does not depend on the loss value computed above
@@ -272,12 +296,14 @@ class CopyGeneratorLossCompute(NMTLossCompute):
         # tgt[i] = align[i] + len(tgt_vocab)
         # for i such that tgt[i] == 0 and align[i] != 0
 
-        # xiuwen: I did not change this part since it does not influence loss
         target_data = target.clone()
         unk = self.criterion.unk_index
-        correct_mask = (target_data == unk) & (align_src != unk)
-        offset_align = align_src[correct_mask] + len(self.tgt_vocab)
-        target_data[correct_mask] += offset_align
+        correct_mask1 = (target_data == unk) & (align_src != unk)
+        offset_align1 = align_src[correct_mask1] + len(self.tgt_vocab)
+        correct_mask2 = (target_data == unk) & (align_conv != unk)
+        offset_align2 = align_conv[correct_mask2] + len(self.tgt_vocab) + batch.src_map.size()[-1]
+        target_data[correct_mask1] += offset_align1
+        target_data[correct_mask2] += offset_align2
 
         # Compute sum of perplexities for stats
         stats = self._stats(loss.sum().clone(), scores_data, target_data)

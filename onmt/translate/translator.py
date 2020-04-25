@@ -106,6 +106,7 @@ class Translator(object):
             model,
             fields,
             src_reader,
+            conv_reader,
             tgt_reader,
             gpu=-1,
             n_best=1,
@@ -162,6 +163,7 @@ class Translator(object):
         self._exclusion_idxs = {
             self._tgt_vocab.stoi[t] for t in self.ignore_when_blocking}
         self.src_reader = src_reader
+        self.conv = conv_reader
         self.tgt_reader = tgt_reader
         self.replace_unk = replace_unk
         if self.replace_unk and not self.model.decoder.attentional:
@@ -230,11 +232,13 @@ class Translator(object):
         """
 
         src_reader = inputters.str2reader[opt.data_type].from_opt(opt)
+        conv_reader = inputters.str2reader["text"].from_opt(opt)
         tgt_reader = inputters.str2reader["text"].from_opt(opt)
         return cls(
             model,
             fields,
             src_reader,
+            conv_reader,
             tgt_reader,
             gpu=opt.gpu,
             n_best=opt.n_best,
@@ -281,6 +285,7 @@ class Translator(object):
     def translate(
             self,
             src,
+            conv,
             tgt=None,
             src_dir=None,
             batch_size=None,
@@ -311,9 +316,10 @@ class Translator(object):
             raise ValueError("batch_size must be set")
 
         src_data = {"reader": self.src_reader, "data": src, "dir": src_dir}
+        conv_data = {"reader": self.conv_reader, "data": conv, "dir": None}
         tgt_data = {"reader": self.tgt_reader, "data": tgt, "dir": None}
         _readers, _data, _dir = inputters.Dataset.config(
-            [('src', src_data), ('tgt', tgt_data)])
+            [('src', src_data), ('conv', conv_data), ('tgt', tgt_data)])
 
         # corpus_id field is useless here
         if self.fields.get("corpus_id", None) is not None:
@@ -552,9 +558,15 @@ class Translator(object):
     def _run_encoder(self, batch):
         src, src_lengths = batch.src if isinstance(batch.src, tuple) \
                            else (batch.src, None)
+        conv, conv_lengths = batch.conv if isinstance(batch.conv, tuple) \
+            else (batch.conv, None)
+        if self.model.__class__.__name__ == "NMTModel":
+            enc_states, memory_bank, lengths = self.model.encoder(
+                src, src_lengths)
+        else:
+            enc_states, memory_bank, lengths = self.model.encoder(src, conv,
+                                                        (src_lengths, conv_lengths))
 
-        enc_states, memory_bank, src_lengths = self.model.encoder(
-            src, src_lengths)
         if src_lengths is None:
             assert not isinstance(memory_bank, tuple), \
                 'Ensemble decoding only supported for text data'
@@ -562,7 +574,7 @@ class Translator(object):
                                .type_as(memory_bank) \
                                .long() \
                                .fill_(memory_bank.size(0))
-        return src, enc_states, memory_bank, src_lengths
+        return src, enc_states, memory_bank, lengths
 
     def _decode_and_generate(
             self,
@@ -572,6 +584,7 @@ class Translator(object):
             src_vocabs,
             memory_lengths,
             src_map=None,
+            conv_map=None,
             step=None,
             batch_offset=None):
         if self.copy_attn:
@@ -584,9 +597,14 @@ class Translator(object):
         # and [src_len, batch, hidden] as memory_bank
         # in case of inference tgt_len = 1, batch = beam times batch_size
         # in case of Gold Scoring tgt_len = actual length, batch = 1 batch
-        dec_out, dec_attn = self.model.decoder(
-            decoder_in, memory_bank, memory_lengths=memory_lengths, step=step
-        )
+        if self.model.__class__.__name__ == "NMTModel":
+            dec_out, dec_attn = self.model.decoder(
+                decoder_in, memory_bank, memory_lengths=memory_lengths, step=step
+            )
+        else:
+            dec_out,  dec_attn = \
+                self.model.decoder(decoder_in, memory_bank,
+                             memory_lengths=memory_lengths)
 
         # Generator forward.
         if not self.copy_attn:
@@ -599,9 +617,11 @@ class Translator(object):
             # or [ tgt_len, batch_size, vocab ] when full sentence
         else:
             attn = dec_attn["copy"]
+            conv_attn = dec_attn["conv_copy"]
             scores = self.model.generator(dec_out.view(-1, dec_out.size(2)),
                                           attn.view(-1, attn.size(2)),
-                                          src_map)
+                                          conv_attn.view(-1, attn.size(2)),
+                                          src_map, conv_map)
             # here we have scores [tgt_lenxbatch, vocab] or [beamxbatch, vocab]
             if batch_offset is None:
                 scores = scores.view(-1, batch.batch_size, scores.size(-1))
@@ -658,6 +678,7 @@ class Translator(object):
 
         # (2) prep decode_strategy. Possibly repeat src objects.
         src_map = batch.src_map if use_src_map else None
+        conv_map = batch.conv_map if use_src_map else None
         fn_map_state, memory_bank, memory_lengths, src_map = \
             decode_strategy.initialize(memory_bank, src_lengths, src_map)
         if fn_map_state is not None:
@@ -674,6 +695,7 @@ class Translator(object):
                 src_vocabs,
                 memory_lengths=memory_lengths,
                 src_map=src_map,
+                conv_map=conv_map,
                 step=step,
                 batch_offset=decode_strategy.batch_offset)
 
@@ -713,14 +735,14 @@ class Translator(object):
             results["alignment"] = [[] for _ in range(batch_size)]
         return results
 
-    def _score_target(self, batch, memory_bank, src_lengths,
-                      src_vocabs, src_map):
+    def _score_target(self, batch, memory_bank, lengths,
+                      src_vocabs, src_map, conv_map):
         tgt = batch.tgt
         tgt_in = tgt[:-1]
 
         log_probs, attn = self._decode_and_generate(
             tgt_in, memory_bank, batch, src_vocabs,
-            memory_lengths=src_lengths, src_map=src_map)
+            memory_lengths=lengths, src_map=src_map, conv_map=conv_map)
 
         log_probs[:, :, self._tgt_pad_idx] = 0
         gold = tgt[1:]

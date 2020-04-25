@@ -662,6 +662,8 @@ def translate_opts(parser):
                    "sequence)")
     group.add('--src_dir', '-src_dir', default="",
               help='Source directory for image or audio files')
+    group.add('--conv', '-conv', default="",
+                       help='Conversation sequence to decode')
     group.add('--tgt', '-tgt',
               help='True target sequence (optional)')
     group.add('--shard_size', '-shard_size', type=int, default=10000,
