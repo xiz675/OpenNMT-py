@@ -341,7 +341,7 @@ class Trainer(object):
                     outputs, attns = valid_model(src, tgt, src_lengths,
                                                  with_align=self.with_align)
                 else:
-                    outputs, attns, _ = \
+                    outputs, attns  = \
                         self.model(src, conv, tgt,
                                    (src_lengths, conv_lengths))
 
