@@ -720,19 +720,14 @@ class Translator(object):
                                         for x in memory_bank)
                 else:
                     memory_bank = memory_bank.index_select(1, select_indices)
-                offset = memory_lengths[0].max()
                 length0 = memory_lengths[0].index_select(0, select_indices)
                 length1 = memory_lengths[1].index_select(0, select_indices)
                 memory_lengths = (length0, length1)
 
-                memory_bank = torch.cat([memory_bank[:length0.max()], memory_bank[offset:offset+length1.max()]], dim=0)
-
                 if src_map is not None:
                     src_map = src_map.index_select(1, select_indices)
-                    src_map = src_map[:length0.max(), :, :]
                 if conv_map is not None:
                     conv_map = conv_map.index_select(1, select_indices)
-                    conv_map = conv_map[:length1.max(), :, :]
 
             if parallel_paths > 1 or any_finished:
                 self.model.decoder.map_state(
