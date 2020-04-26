@@ -33,15 +33,17 @@ class TranslationBuilder(object):
         self.phrase_table = phrase_table
         self.has_tgt = has_tgt
 
-    def _build_target_tokens(self, src, src_vocab, src_raw, pred, attn):
+    def _build_target_tokens(self, src, src_vocab, conv_vocab, src_raw, pred, attn):
         tgt_field = dict(self.fields)["tgt"].base_field
         vocab = tgt_field.vocab
         tokens = []
         for tok in pred:
             if tok < len(vocab):
                 tokens.append(vocab.itos[tok])
-            else:
+            elif tok - len(vocab) < len(src_vocab.itos):
                 tokens.append(src_vocab.itos[tok - len(vocab)])
+            elif tok - len(vocab) - len(src_vocab.itos) < len(src_vocab.itos):
+                tokens.append(conv_vocab.itos[tok - len(vocab) - len(src_vocab.itos)])
             if tokens[-1] == tgt_field.eos_token:
                 tokens = tokens[:-1]
                 break
@@ -89,13 +91,15 @@ class TranslationBuilder(object):
             if self._has_text_src:
                 src_vocab = self.data.src_vocabs[inds[b]] \
                     if self.data.src_vocabs else None
+                conv_vocab = self.data.conv_vocabs[inds[b]] \
+                    if self.data.conv_vocabs else None
                 src_raw = self.data.examples[inds[b]].src[0]
             else:
                 src_vocab = None
                 src_raw = None
             pred_sents = [self._build_target_tokens(
                 src[:, b] if src is not None else None,
-                src_vocab, src_raw,
+                src_vocab, conv_vocab, src_raw,
                 preds[b][n],
                 align[b][n] if align[b] is not None else attn[b][n])
                 for n in range(self.n_best)]
@@ -103,7 +107,7 @@ class TranslationBuilder(object):
             if tgt is not None:
                 gold_sent = self._build_target_tokens(
                     src[:, b] if src is not None else None,
-                    src_vocab, src_raw,
+                    src_vocab,conv_vocab,  src_raw,
                     tgt[1:, b] if tgt is not None else None, None)
 
             translation = Translation(
