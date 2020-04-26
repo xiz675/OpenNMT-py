@@ -163,7 +163,7 @@ class Translator(object):
         self._exclusion_idxs = {
             self._tgt_vocab.stoi[t] for t in self.ignore_when_blocking}
         self.src_reader = src_reader
-        self.conv = conv_reader
+        self.conv_reader = conv_reader
         self.tgt_reader = tgt_reader
         self.replace_unk = replace_unk
         if self.replace_unk and not self.model.decoder.attentional:
@@ -271,12 +271,12 @@ class Translator(object):
         else:
             print(msg)
 
-    def _gold_score(self, batch, memory_bank, src_lengths, src_vocabs,
+    def _gold_score(self, batch, memory_bank, src_lengths, src_vocabs, conv_vocabs,
                     use_src_map, enc_states, batch_size, src):
         if "tgt" in batch.__dict__:
             gs = self._score_target(
-                batch, memory_bank, src_lengths, src_vocabs,
-                batch.src_map if use_src_map else None)
+                batch, memory_bank, src_lengths, src_vocabs, conv_vocabs,
+                batch.src_map if use_src_map else None, batch.conv_map if use_src_map else None)
             self.model.decoder.init_state(src, memory_bank, enc_states)
         else:
             gs = [0] * batch_size
@@ -358,7 +358,7 @@ class Translator(object):
 
         for batch in data_iter:
             batch_data = self.translate_batch(
-                batch, data.src_vocabs, attn_debug
+                batch, data.src_vocabs, data.conv_vocabs,  attn_debug
             )
             translations = xlation_builder.from_batch(batch_data)
 
@@ -381,7 +381,7 @@ class Translator(object):
                                     for pred, align in zip(
                                         n_best_preds, n_best_preds_align)]
                 all_predictions += [n_best_preds]
-                self.out_file.write('\n'.join(n_best_preds) + '\n')
+                self.out_file.write(';'.join(n_best_preds) + '\n')
                 self.out_file.flush()
 
                 if self.verbose:
@@ -520,7 +520,7 @@ class Translator(object):
             alignment_attn, prediction_mask, src_lengths, n_best)
         return alignement
 
-    def translate_batch(self, batch, src_vocabs, attn_debug):
+    def translate_batch(self, batch, src_vocabs, conv_vocabs,  attn_debug):
         """Translate a batch of sentences."""
         with torch.no_grad():
             if self.beam_size == 1:
@@ -552,7 +552,7 @@ class Translator(object):
                     exclusion_tokens=self._exclusion_idxs,
                     stepwise_penalty=self.stepwise_penalty,
                     ratio=self.ratio)
-            return self._translate_batch_with_strategy(batch, src_vocabs,
+            return self._translate_batch_with_strategy(batch, src_vocabs, conv_vocabs,
                                                        decode_strategy)
 
     def _run_encoder(self, batch):
@@ -582,6 +582,7 @@ class Translator(object):
             memory_bank,
             batch,
             src_vocabs,
+            conv_vocabs,
             memory_lengths,
             src_map=None,
             conv_map=None,
@@ -620,9 +621,10 @@ class Translator(object):
             conv_attn = dec_attn["conv_copy"]
             scores = self.model.generator(dec_out.view(-1, dec_out.size(2)),
                                           attn.view(-1, attn.size(2)),
-                                          conv_attn.view(-1, attn.size(2)),
+                                          conv_attn.view(-1, conv_attn.size(2)),
                                           src_map, conv_map)
             # here we have scores [tgt_lenxbatch, vocab] or [beamxbatch, vocab]
+            scores = torch.cat([scores[0], scores[1], scores[2]], 1).clone()
             if batch_offset is None:
                 scores = scores.view(-1, batch.batch_size, scores.size(-1))
                 scores = scores.transpose(0, 1).contiguous()
@@ -633,6 +635,7 @@ class Translator(object):
                 batch,
                 self._tgt_vocab,
                 src_vocabs,
+                conv_vocabs,
                 batch_dim=0,
                 batch_offset=batch_offset
             )
@@ -646,6 +649,7 @@ class Translator(object):
             self,
             batch,
             src_vocabs,
+            conv_vocabs,
             decode_strategy):
         """Translate a batch of sentences step by step using cache.
 
@@ -664,7 +668,7 @@ class Translator(object):
         batch_size = batch.batch_size
 
         # (1) Run the encoder on the src.
-        src, enc_states, memory_bank, src_lengths = self._run_encoder(batch)
+        src, enc_states, memory_bank, lengths = self._run_encoder(batch)
         self.model.decoder.init_state(src, memory_bank, enc_states)
 
         results = {
@@ -673,14 +677,14 @@ class Translator(object):
             "attention": None,
             "batch": batch,
             "gold_score": self._gold_score(
-                batch, memory_bank, src_lengths, src_vocabs, use_src_map,
+                batch, memory_bank, lengths, src_vocabs, conv_vocabs, use_src_map,
                 enc_states, batch_size, src)}
 
         # (2) prep decode_strategy. Possibly repeat src objects.
         src_map = batch.src_map if use_src_map else None
         conv_map = batch.conv_map if use_src_map else None
-        fn_map_state, memory_bank, memory_lengths, src_map = \
-            decode_strategy.initialize(memory_bank, src_lengths, src_map)
+        fn_map_state, memory_bank, memory_lengths, src_map, conv_map = \
+            decode_strategy.initialize(memory_bank, lengths, src_map, conv_map)
         if fn_map_state is not None:
             self.model.decoder.map_state(fn_map_state)
 
@@ -693,6 +697,7 @@ class Translator(object):
                 memory_bank,
                 batch,
                 src_vocabs,
+                conv_vocabs,
                 memory_lengths=memory_lengths,
                 src_map=src_map,
                 conv_map=conv_map,
@@ -715,11 +720,14 @@ class Translator(object):
                                         for x in memory_bank)
                 else:
                     memory_bank = memory_bank.index_select(1, select_indices)
-
-                memory_lengths = memory_lengths.index_select(0, select_indices)
+                length0 = memory_lengths[0].index_select(0, select_indices)
+                length1 = memory_lengths[1].index_select(0, select_indices)
+                memory_lengths = (length0, length1)
 
                 if src_map is not None:
                     src_map = src_map.index_select(1, select_indices)
+                if conv_map is not None:
+                    conv_map = conv_map.index_select(1, select_indices)
 
             if parallel_paths > 1 or any_finished:
                 self.model.decoder.map_state(
@@ -736,12 +744,12 @@ class Translator(object):
         return results
 
     def _score_target(self, batch, memory_bank, lengths,
-                      src_vocabs, src_map, conv_map):
+                      src_vocabs, conv_vocabs, src_map, conv_map):
         tgt = batch.tgt
         tgt_in = tgt[:-1]
 
         log_probs, attn = self._decode_and_generate(
-            tgt_in, memory_bank, batch, src_vocabs,
+            tgt_in, memory_bank, batch, src_vocabs, conv_vocabs,
             memory_lengths=lengths, src_map=src_map, conv_map=conv_map)
 
         log_probs[:, :, self._tgt_pad_idx] = 0
