@@ -145,6 +145,11 @@ class CopyGenerator(nn.Module):
         p_tweets_copy = torch.sigmoid(self.linear_copy(hidden))
         p_conv_copy = torch.sigmoid(self.linear_conv_copy(hidden))
 
+        temp = torch.softmax(torch.cat((p_tweets_copy, p_conv_copy, 1 - p_tweets_copy - p_conv_copy), dim=1), dim=1)
+        p_tweets_copy = temp[:, 0].unsqueeze(dim=1)
+        p_conv_copy = temp[:, 1].unsqueeze(dim=1)
+        temp_out_prob = temp[:, 2].unsqueeze(dim=1)
+
         mul_attn = torch.mul(attn, p_tweets_copy)
         mul_conv_attn = torch.mul(conv_attn, p_conv_copy)
 
@@ -160,7 +165,10 @@ class CopyGenerator(nn.Module):
         conv_copy_prob = conv_copy_prob.contiguous().view(-1, conv_cvocab)
 
         # Probability of not copying: p_{word}(w) * (1 - p(z))
-        out_prob = torch.mul(prob, 1 - p_tweets_copy - p_conv_copy)
+
+        # out_prob = torch.mul(prob, 1 - p_tweets_copy - p_conv_copy)
+        out_prob = torch.mul(prob, temp_out_prob)
+
         # return torch.cat([out_prob, copy_prob, conv_copy_prob], 1)
         return out_prob, copy_prob, conv_copy_prob
 
@@ -196,7 +204,6 @@ class CopyGeneratorLoss(nn.Module):
         # probability of tokens copied from conversation
         copy_conv_ix = align_conv.unsqueeze(1)
         copy_conv_tok_probs = scores[2].gather(1, copy_conv_ix).squeeze(1)
-
 
         # Set scores for unk to 0 and add eps
         copy_tok_probs[align_src == self.unk_index] = 0
