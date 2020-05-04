@@ -119,7 +119,6 @@ class CopyGenerator(nn.Module):
         self.linear = nn.Linear(input_size, output_size)
         self.linear_copy = nn.Linear(input_size, 1)
         self.linear_conv_copy = nn.Linear(input_size, 1)
-        self.linear_generator = nn.Linear(input_size, 1)
         self.pad_idx = pad_idx
 
     def forward(self, hidden, attn, conv_attn, src_map, conv_map):
@@ -153,11 +152,10 @@ class CopyGenerator(nn.Module):
         prob = torch.softmax(logits, 1)
 
         # Probability of copying p(z=1) batch.
-        p_tweets_copy = self.linear_copy(hidden)
-        p_conv_copy = self.linear_conv_copy(hidden)
-        p_gen = self.linear_generator(hidden)
+        p_tweets_copy = torch.sigmoid(self.linear_copy(hidden))
+        p_conv_copy = torch.sigmoid(self.linear_conv_copy(hidden))
 
-        temp = torch.softmax(torch.cat((p_tweets_copy, p_conv_copy, p_gen), dim=1), dim=1)
+        temp = torch.softmax(torch.cat((p_tweets_copy, p_conv_copy, 1 - p_tweets_copy - p_conv_copy), dim=1), dim=1)
         p_tweets_copy = temp[:, 0].unsqueeze(dim=1)
         p_conv_copy = temp[:, 1].unsqueeze(dim=1)
         temp_out_prob = temp[:, 2].unsqueeze(dim=1)
