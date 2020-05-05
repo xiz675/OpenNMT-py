@@ -33,17 +33,17 @@ class TranslationBuilder(object):
         self.phrase_table = phrase_table
         self.has_tgt = has_tgt
 
-    def _build_target_tokens(self, src, src_vocab, conv_vocab, src_raw, pred, attn):
+    def _build_target_tokens(self, src, src_vocab, conv_vocab, src_raw, offset, pred, attn):
         tgt_field = dict(self.fields)["tgt"].base_field
         vocab = tgt_field.vocab
         tokens = []
         for tok in pred:
             if tok < len(vocab):
                 tokens.append(vocab.itos[tok])
-            elif tok - len(vocab) < len(src_vocab.itos):
+            elif tok - len(vocab) < offset:
                 tokens.append(src_vocab.itos[tok - len(vocab)])
-            elif tok - len(vocab) - len(src_vocab.itos) < len(conv_vocab.itos):
-                tokens.append(conv_vocab.itos[tok - len(vocab) - len(src_vocab.itos)])
+            elif tok - len(vocab) - offset < len(conv_vocab.itos):
+                tokens.append(conv_vocab.itos[tok - len(vocab) - len(offset)])
             if len(tokens) > 0 and  tokens[-1] == tgt_field.eos_token:
                 tokens = tokens[:-1]
                 break
@@ -61,6 +61,7 @@ class TranslationBuilder(object):
 
     def from_batch(self, translation_batch):
         batch = translation_batch["batch"]
+        offset = batch.src_map.size()[-1]
         assert(len(translation_batch["gold_score"]) ==
                len(translation_batch["predictions"]))
         batch_size = batch.batch_size
@@ -99,7 +100,7 @@ class TranslationBuilder(object):
                 src_raw = None
             pred_sents = [self._build_target_tokens(
                 src[:, b] if src is not None else None,
-                src_vocab, conv_vocab, src_raw,
+                src_vocab, conv_vocab, src_raw, offset,
                 preds[b][n],
                 align[b][n] if align[b] is not None else attn[b][n])
                 for n in range(self.n_best)]
@@ -107,7 +108,7 @@ class TranslationBuilder(object):
             if tgt is not None:
                 gold_sent = self._build_target_tokens(
                     src[:, b] if src is not None else None,
-                    src_vocab,conv_vocab,  src_raw,
+                    src_vocab,conv_vocab,  src_raw, offset,
                     tgt[1:, b] if tgt is not None else None, None)
 
             translation = Translation(
