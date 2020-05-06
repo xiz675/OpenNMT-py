@@ -42,9 +42,9 @@ class TranslationBuilder(object):
                 tokens.append(vocab.itos[tok])
             elif tok - len(vocab) < offset:
                 tokens.append(src_vocab.itos[tok - len(vocab)])
-            elif tok - len(vocab) - offset < len(conv_vocab.itos):
+            else:
                 tokens.append(conv_vocab.itos[tok - len(vocab) - offset])
-            if len(tokens) > 0 and  tokens[-1] == tgt_field.eos_token:
+            if tokens[-1] == tgt_field.eos_token:
                 tokens = tokens[:-1]
                 break
         if self.replace_unk and attn is not None and src is not None:
