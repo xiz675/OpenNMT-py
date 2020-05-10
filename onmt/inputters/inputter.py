@@ -441,7 +441,7 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
         conv_field = conv_multifield.base_field
         tgt_field = tgt_multifield.base_field
         merged = sum(
-            [src_field.vocab.freqs, conv_field.vocab.freqs], Counter()
+            [Counter(dict(src_field.vocab.freqs.most_common(src_vocab_size))), Counter(dict(conv_field.vocab.freqs.most_common(conv_vocab_size)))], Counter()
         )
         merged_vocab = Vocab(
             merged
