@@ -440,13 +440,11 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
         src_field = src_multifield.base_field
         conv_field = conv_multifield.base_field
         tgt_field = tgt_multifield.base_field
-        specials = [src_field.unk_token, src_field.pad_token,
-                    src_field.init_token, src_field.eos_token]
         merged = sum(
             [src_field.vocab.freqs, conv_field.vocab.freqs], Counter()
         )
         merged_vocab = Vocab(
-            merged, specials=specials
+            merged
         )
         src_field.vocab = merged_vocab
         conv_field.vocab = merged_vocab
