@@ -238,7 +238,7 @@ class CopyGeneratorLoss(nn.Module):
             non_copy = non_copy | (target.cpu() != self.unk_index)
 
         probs = torch.where(
-            non_copy, copy_tok_probs + copy_conv_tok_probs + vocab_probs, copy_tok_probs + copy_conv_tok_probs
+            non_copy.cuda(), copy_tok_probs + copy_conv_tok_probs + vocab_probs, copy_tok_probs + copy_conv_tok_probs
         )
 
         loss = -probs.log()  # just NLLLoss; can the module be incorporated?
