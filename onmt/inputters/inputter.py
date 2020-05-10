@@ -187,6 +187,8 @@ def get_fields(
         src_ex_vocab = RawField()
         fields["src_ex_vocab"] = src_ex_vocab
 
+        fields["bm25"] = Field(use_vocab=False, dtype=torch.float, sequential=False)
+
         conv_map = Field(
             use_vocab=False, dtype=torch.float,
             postprocessing=make_src, sequential=False)
