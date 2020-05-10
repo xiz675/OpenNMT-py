@@ -315,8 +315,15 @@ class Translator(object):
         if batch_size is None:
             raise ValueError("batch_size must be set")
 
+        text = []
+        bm = []
+        for temp_i in conv:
+            splitted = temp_i.decode("utf-8").strip().split("|||||")
+            text.append(str.encode(splitted[0]))
+            bm.append(float(splitted[1]))
+
         src_data = {"reader": self.src_reader, "data": src, "dir": src_dir}
-        conv_data = {"reader": self.conv_reader, "data": conv, "dir": None}
+        conv_data = {"reader": self.conv_reader, "data": text, "bm25": bm, "dir": None}
         tgt_data = {"reader": self.tgt_reader, "data": tgt, "dir": None}
         _readers, _data, _dir = inputters.Dataset.config(
             [('src', src_data), ('conv', conv_data), ('tgt', tgt_data)])
