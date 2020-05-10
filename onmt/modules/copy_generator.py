@@ -116,13 +116,14 @@ class CopyGenerator(nn.Module):
 
     def __init__(self, input_size, output_size, pad_idx):
         super(CopyGenerator, self).__init__()
+        self.linear_bm25 = nn.Linear(1, 1)
         self.linear = nn.Linear(input_size, output_size)
         self.linear_copy = nn.Linear(input_size, 1)
         self.linear_conv_copy = nn.Linear(input_size, 1)
         self.linear_generator = nn.Linear(input_size, 1)
         self.pad_idx = pad_idx
 
-    def forward(self, hidden, attn, conv_attn, src_map, conv_map):
+    def forward(self, hidden, attn, conv_attn, bm25, src_map, conv_map):
         """
         Compute a distribution over the target dictionary
         extended by the dynamic dictionary implied by copying
@@ -154,7 +155,10 @@ class CopyGenerator(nn.Module):
 
         # Probability of copying p(z=1) batch.
         p_tweets_copy = self.linear_copy(hidden)
-        p_conv_copy = self.linear_conv_copy(hidden)
+
+        bm25_normalized = self.linear_bm25(bm25.view(-1, 1)).view(bm25.size()[0])
+        bias = torch.sigmoid(bm25_normalized)
+        p_conv_copy = bias * self.linear_conv_copy(hidden)
         p_gen = self.linear_generator(hidden)
 
         temp = torch.softmax(torch.cat((p_tweets_copy, p_conv_copy, p_gen), dim=1), dim=1)
@@ -234,7 +238,7 @@ class CopyGeneratorLoss(nn.Module):
             non_copy = non_copy | (target.cpu() != self.unk_index)
 
         probs = torch.where(
-            non_copy.cuda(), copy_tok_probs + copy_conv_tok_probs + vocab_probs, copy_tok_probs + copy_conv_tok_probs
+            non_copy, copy_tok_probs + copy_conv_tok_probs + vocab_probs, copy_tok_probs + copy_conv_tok_probs
         )
 
         loss = -probs.log()  # just NLLLoss; can the module be incorporated?
@@ -266,7 +270,7 @@ class CopyGeneratorLossCompute(NMTLossCompute):
             "copy_attn": attns.get("copy"),
             "conv_copy_attn": attns.get("conv_copy"),
             "align_src": batch.alignment[range_[0] + 1: range_[1]],
-            "align_conv": batch.conv_alignment[range_[0] + 1: range_[1]]
+            "align_conv": batch.conv_alignment[range_[0] + 1: range_[1]],
         })
         return shard_state
 
@@ -286,8 +290,9 @@ class CopyGeneratorLossCompute(NMTLossCompute):
         target = target.view(-1)
         align_src = align_src.view(-1)
         align_conv = align_conv.view(-1)
+
         scores = self.generator(
-            self._bottle(output), self._bottle(copy_attn), self._bottle(conv_copy_attn), batch.src_map, batch.conv_map
+            self._bottle(output), self._bottle(copy_attn), self._bottle(conv_copy_attn), batch.bm25.repeat(output.shape[0]), batch.src_map, batch.conv_map
         )
         loss = self.criterion(scores, align_src, align_conv, target)
 
