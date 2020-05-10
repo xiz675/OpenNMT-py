@@ -436,13 +436,25 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
             build_fv_args,
             size_multiple=vocab_size_multiple if not share_vocab else 1)
 
+        logger.info(" * merging src and conv vocab...")
+        src_field = src_multifield.base_field
+        conv_field = conv_multifield.base_field
+        tgt_field = tgt_multifield.base_field
+        specials = [src_field.unk_token, src_field.pad_token,
+                    src_field.init_token, src_field.eos_token]
+        merged = sum(
+            [src_field.vocab.freqs, conv_field.vocab.freqs], Counter()
+        )
+        merged_vocab = Vocab(
+            merged, specials=specials
+        )
+        src_field.vocab = merged_vocab
+        conv_field.vocab = merged_vocab
 
         if share_vocab:
             # `tgt_vocab_size` is ignored when sharing vocabularies
             logger.info(" * merging src and tgt vocab...")
-            src_field = src_multifield.base_field
-            conv_field = conv_multifield.base_field
-            tgt_field = tgt_multifield.base_field
+
             _merge_field_vocabs(
                 src_field, conv_field, tgt_field, vocab_size=src_vocab_size,
                 min_freq=src_words_min_frequency,
@@ -581,7 +593,7 @@ def _merge_field_vocabs(src_field, conv_field, tgt_field, vocab_size, min_freq,
     specials = [tgt_field.unk_token, tgt_field.pad_token,
                 tgt_field.init_token, tgt_field.eos_token]
     merged = sum(
-        [src_field.vocab.freqs, conv_field.vocab.freqs, tgt_field.vocab.freqs], Counter()
+        [src_field.vocab.freqs, tgt_field.vocab.freqs], Counter()
     )
     merged_vocab = Vocab(
         merged, specials=specials,
