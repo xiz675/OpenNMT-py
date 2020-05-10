@@ -2,6 +2,7 @@ def repeat(srcs, convs, tags):
     new_src = []
     new_conv = []
     new_tag = []
+    print("size before repeat: " + str(len(srcs)))
     for i in zip(srcs, convs, tags):
         tag_list = i[2].split(";")
         for j in range(len(tag_list)):
@@ -9,6 +10,7 @@ def repeat(srcs, convs, tags):
             new_conv.append(i[1])
         new_tag += tag_list
     assert len(new_conv) == len(new_src) == len(new_tag)
+    print("size after repeat: " + str(len(new_src)))
     return new_src, new_conv, new_tag
 
 
@@ -29,15 +31,16 @@ def read_file(file_path):
 
 if __name__ == '__main__':
     key = "train"
-    src_path = "./data/" + key + "_post.txt"
-    conv_path = "./data/" + key + "_conv.txt"
-    tag_path = "./data/" + key + "_tag.txt"
+    base_path = "./data/Twitter/"
+    src_path = base_path + key + "_post.txt"
+    conv_path = base_path + key + "_conv.txt"
+    tag_path = base_path + key + "_tag.txt"
     srcs = read_file(src_path)
     convs = read_file(conv_path)
     tags = read_file(tag_path)
     new_data = repeat(srcs, convs, tags)
-    write_to_file('./data/new_'+key+ "_post.txt", new_data[0])
-    write_to_file('./data/new_' + key + "_conv.txt", new_data[1])
-    write_to_file('./data/new_' + key + "_tag.txt", new_data[2])
+    write_to_file(base_path + key + "new_post.txt", new_data[0])
+    write_to_file(base_path + key + "new_conv.txt", new_data[1])
+    write_to_file(base_path + key + "new_tag.txt", new_data[2])
 
 
