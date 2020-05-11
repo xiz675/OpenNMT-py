@@ -48,14 +48,14 @@ def check_existing_pt_files(opt, corpus_type, ids, existing_fields):
 def process_one_shard(corpus_params, params):
     corpus_type, fields, src_reader, conv_reader,tgt_reader, align_reader, opt,\
          existing_fields, src_vocab, conv_vocab, tgt_vocab = corpus_params
-    i, (src_shard, conv_shard, bm_shard, tgt_shard, align_shard, maybe_id, filter_pred) = params
+    i, (src_shard, conv_shard, tgt_shard, align_shard, maybe_id, filter_pred) = params
     # create one counter per shard
     sub_sub_counter = defaultdict(Counter)
     assert len(src_shard) == len(tgt_shard)
     logger.info("Building shard %d." % i)
 
     src_data = {"reader": src_reader, "data": src_shard, "dir": opt.src_dir}
-    conv_data = {"reader": conv_reader, "data": conv_shard, "dir": None, "bm25": bm_shard}
+    conv_data = {"reader": conv_reader, "data": conv_shard, "dir": None}
     tgt_data = {"reader": tgt_reader, "data": tgt_shard, "dir": None}
     align_data = {"reader": align_reader, "data": align_shard, "dir": None}
     _readers, _data, _dir = inputters.Dataset.config(
@@ -197,13 +197,7 @@ def build_save_dataset(corpus_type, fields, src_reader, conv_reader, tgt_reader,
             align_shards = split_corpus(maybe_align, opt.shard_size)
             for i, (ss, cs, ts, a_s) in enumerate(
                     zip(src_shards, conv_shards, tgt_shards, align_shards)):
-                text = []
-                bm = []
-                for temp_i in cs:
-                    splitted = temp_i.decode("utf-8").strip().split("|||||")
-                    text.append(str.encode(splitted[0]))
-                    bm.append(float(splitted[1]))
-                yield (i, (ss, text, bm, ts, a_s, maybe_id, filter_pred))
+                yield (i, (ss, cs, ts, a_s, maybe_id, filter_pred))
 
     shard_iter = shard_iterator(srcs, convs, tgts, ids, aligns, existing_shards,
                                 existing_fields, corpus_type, opt)

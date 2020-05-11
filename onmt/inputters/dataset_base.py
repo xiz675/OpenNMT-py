@@ -127,11 +127,8 @@ class Dataset(TorchtextDataset):
         self.sort_key = sort_key
         can_copy = 'src_map' in fields and 'alignment' in fields
 
-        read_iters = []
-        for r, dat, dir_ in zip(readers, data, dirs):
-            if dat[0] == "conv":
-                read_iters.append(r.read(dat[2], "bm25", dir_))
-            read_iters.append(r.read(dat[1], dat[0], dir_))
+        read_iters = [r.read(dat[1],  dat[0],  dir_) for r, dat, dir_
+                      in zip(readers, data, dirs)]
 
         # self.src_vocabs is used in collapse_copy_scores and Translator.py
         self.src_vocabs = []
@@ -186,9 +183,6 @@ class Dataset(TorchtextDataset):
         for name, field in fields:
             if field["data"] is not None:
                 readers.append(field["reader"])
-                if name == "conv":
-                    data.append((name, field["data"], field["bm25"]))
-                else:
-                    data.append((name, field["data"]))
+                data.append((name, field["data"]))
                 dirs.append(field["dir"])
         return readers, data, dirs
