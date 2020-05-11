@@ -123,7 +123,7 @@ class CopyGenerator(nn.Module):
         self.linear_generator = nn.Linear(input_size, 1)
         self.pad_idx = pad_idx
 
-    def forward(self, hidden, attn, conv_attn, bm25, src_map, conv_map):
+    def forward(self, hidden, attn, conv_attn, src_map, conv_map):
         """
         Compute a distribution over the target dictionary
         extended by the dynamic dictionary implied by copying
@@ -156,9 +156,10 @@ class CopyGenerator(nn.Module):
         # Probability of copying p(z=1) batch.
         p_tweets_copy = self.linear_copy(hidden)
 
-        bm25_normalized = self.linear_bm25(bm25.view(-1, 1)).view(bm25.size()[0])
-        bias = torch.sigmoid(bm25_normalized)
-        p_conv_copy = bias * self.linear_conv_copy(hidden)
+        # bm25_normalized = self.linear_bm25(bm25.view(-1, 1)).view(bm25.size()[0])
+        # bias = torch.sigmoid(bm25_normalized)
+        # p_conv_copy = bias * self.linear_conv_copy(hidden)
+        p_conv_copy = self.linear_conv_copy(hidden)
         p_gen = self.linear_generator(hidden)
 
         temp = torch.softmax(torch.cat((p_tweets_copy, p_conv_copy, p_gen), dim=1), dim=1)
@@ -292,8 +293,13 @@ class CopyGeneratorLossCompute(NMTLossCompute):
         align_conv = align_conv.view(-1)
 
         scores = self.generator(
-            self._bottle(output), self._bottle(copy_attn), self._bottle(conv_copy_attn), batch.bm25.repeat(output.shape[0]), batch.src_map, batch.conv_map
+            self._bottle(output), self._bottle(copy_attn), self._bottle(conv_copy_attn),
+            batch.src_map, batch.conv_map
         )
+
+        # scores = self.generator(
+        #     self._bottle(output), self._bottle(copy_attn), self._bottle(conv_copy_attn), batch.bm25.repeat(output.shape[0]), batch.src_map, batch.conv_map
+        # )
         loss = self.criterion(scores, align_src, align_conv, target)
 
         if self.lambda_coverage != 0.0:
