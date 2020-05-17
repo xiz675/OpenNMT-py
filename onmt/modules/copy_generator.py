@@ -53,15 +53,18 @@ def collapse_copy_scores(scores, batch, tgt_vocab, src_vocabs=None, conv_vocabs=
                 blank_copy.append(offset2 + j)
                 fill_copy.append(offset1 + si)
 
+        score = scores[:, b] if batch_dim == 1 else scores[b]
+
         if blank:
             blank = torch.Tensor(blank).type_as(batch.indices.data)
             fill = torch.Tensor(fill).type_as(batch.indices.data)
+            score.index_add_(1, fill, score.index_select(1, blank))
+            score.index_fill_(1, blank, 1e-10)
+
+        if blank_copy:
             blank_copy = torch.Tensor(blank_copy).type_as(batch.indices.data)
             fill_copy = torch.Tensor(fill_copy).type_as(batch.indices.data)
-            score = scores[:, b] if batch_dim == 1 else scores[b]
-            score.index_add_(1, fill, score.index_select(1, blank))
             score.index_add_(1, fill_copy, score.index_select(1, blank_copy))
-            score.index_fill_(1, blank, 1e-10)
             score.index_fill_(1, blank_copy, 1e-10)
 
     return scores
